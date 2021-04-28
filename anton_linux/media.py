@@ -72,7 +72,8 @@ class Player:
         self.properties_interface.on_properties_changed(self.on_state_changed)
 
         self.update_metadata(await self.media_interface.get_metadata(), {})
-        self.update_play_state(await self.media_interface.get_playback_status(),                               {})
+        self.update_play_state(await self.media_interface.get_playback_status(),
+                               {})
         self.player_name = await self.player_interface.get_identity()
 
     async def disconnect(self):
