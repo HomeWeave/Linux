@@ -27,20 +27,25 @@ APIS = {
     "simple_notification_instruction": send_notification,
 }
 
-def get_online_event():
-    hostname = socket.gethostname()
-    mac = hex(getnode())
+class EventWrapper:
+    def __init__(self):
+        self.hostname = socket.gethostname()
+        self.mac = hex(getnode())
 
-    notification_capability = NotificationCapabilities(
-            simple_text_notification_supported=True)
-    capabilities = Capabilities(
-            notification_capabilities=notification_capability)
+    def online_event(self):
+        notification_capability = NotificationCapabilities(
+                simple_text_notification_supported=True)
+        capabilities = Capabilities(
+                notification_capabilities=notification_capability)
 
-    discovery_event = DeviceOnlineEvent(friendly_name=hostname,
-                                        capabilities=capabilities)
-    device_discovery_event = GenericEvent(device_id=mac,
-                                          device_online=discovery_event)
+        discovery_event = DeviceOnlineEvent(friendly_name=self.hostname,
+                                            capabilities=capabilities)
+        device_discovery_event = GenericEvent(device_id=self.mac,
+                                              device_online=discovery_event)
+        return device_discovery_event
 
+    def media_event(self, media):
+        return GenericEvent(device_id=self.mac, media=media)
 
 
 class AntonLinuxPlugin(AntonPlugin):
@@ -48,6 +53,8 @@ class AntonLinuxPlugin(AntonPlugin):
         instruction_controller = GenericInstructionController(APIS)
         event_controller = GenericEventController(lambda call_status: 0)
         self.send_event = event_controller.create_client(0, self.on_response)
+
+        self.event_wrapper = EventWrapper()
 
         registry = self.channel_registrar()
         registry.register_controller(PipeType.IOT_INSTRUCTION,
@@ -66,10 +73,11 @@ class AntonLinuxPlugin(AntonPlugin):
                                                 callbacks)
 
     def on_start(self):
+        self.send_event(self.event_wrapper.online_event())
+
         self.loop.run_until_complete(self.session_bus.connect())
         self.loop.run_until_complete(self.media_controller.start())
 
-        # self.send_event(get_online_event())
         self.loop_thread.start()
 
     def start_event_loop(self):
@@ -88,16 +96,16 @@ class AntonLinuxPlugin(AntonPlugin):
 
     def media_updated(self, player):
         media = player.current_media
-        event = MediaEvent(
+        media_event = MediaEvent(
                 player_id=player.uri, player_name=player.player_name,
                 track_name=media.title, artist=media.artist, url=media.url,
                 album_art=media.album_art_url)
         mapping = {PlayState.PLAYING: MediaEvent.PlayStatus.PLAYING,
                    PlayState.PAUSED: MediaEvent.PlayStatus.PAUSED,
                    PlayState.STOPPED: MediaEvent.PlayStatus.STOPPED}
-        event.play_status = mapping.get(player.play_state,
-                                        MediaEvent.PlayStatus.STOPPED)
+        media_event.play_status = mapping.get(player.play_state,
+                                              MediaEvent.PlayStatus.STOPPED)
 
-        log_info("Media Changed: " + str(event))
+        log_info("Media Changed: " + str(media_event))
 
-        self.send_event(event)
+        self.send_event(self.event_wrapper.media_event(media_event))
