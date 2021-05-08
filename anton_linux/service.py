@@ -106,6 +106,4 @@ class AntonLinuxPlugin(AntonPlugin):
         media_event.play_status = mapping.get(player.play_state,
                                               MediaEvent.PlayStatus.STOPPED)
 
-        log_info("Media Changed: " + str(media_event))
-
         self.send_event(self.event_wrapper.media_event(media_event))
