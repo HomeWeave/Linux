@@ -79,8 +79,20 @@ class Player:
     async def disconnect(self):
         pass
 
-    async def play_pause(self):
-        return await self.media_interface.call_play_pause()
+    async def play(self):
+        return await self.media_interface.call_play()
+
+    async def pause(self):
+        return await self.media_interface.call_pause()
+
+    async def next(self):
+        return await self.media_interface.call_next()
+
+    async def previous(self):
+        return await self.media_interface.call_previous()
+
+    async def stop(self):
+        return await self.media_interface.stop()
 
     def on_seeked(self, time):
         print("Seek: ", time)
@@ -194,5 +206,22 @@ class MediaController:
                 self.refresh_players(player_uri, old_owner, new_owner),
                 loop=self.loop)
 
-    async def play_pause(self):
-        return await self.current_player.play_pause()
+    async def play(self, uri=None):
+        player = self.players.get(uri, self.current_player)
+        return await self.current_player.play()
+
+    async def pause(self, uri=None):
+        player = self.players.get(uri, self.current_player)
+        return await self.current_player.pause()
+
+    async def stop(self, uri=None):
+        player = self.players.get(uri, self.current_player)
+        return await self.current_player.stop()
+
+    async def next(self):
+        player = self.players.get(uri, self.current_player)
+        return await self.current_player.next()
+
+    async def previous(self):
+        player = self.players.get(uri, self.current_player)
+        return await self.current_player.previous()
