@@ -11,9 +11,12 @@ from pyantonlib.channel import GenericInstructionController
 from pyantonlib.channel import GenericEventController
 from pyantonlib.utils import log_info
 from anton.plugin_pb2 import PipeType
-from anton.events_pb2 import GenericEvent, DeviceOnlineEvent
-from anton.events_pb2 import MediaEvent
-from anton.capabilities_pb2 import Capabilities, NotificationCapabilities
+from anton.events_pb2 import GenericEvent
+from anton.media_pb2 import PlayStatus
+from anton.device_pb2 import DeviceKind
+from anton.device_pb2 import DEVICE_STATUS_ONLINE, DEVICE_KIND_COMPUTER
+from anton.media_pb2 import MediaChangedEvent
+from anton.power_pb2 import POWER_OFF, SCREEN_OFF, SLEEP
 
 from anton_linux.media import MediaController, PlayState
 from anton_linux.media import MEDIA_UPDATED_EVENT, PLAYBACK_CHANGED_EVENT
@@ -33,19 +36,21 @@ class EventWrapper:
         self.mac = hex(getnode())
 
     def online_event(self):
-        notification_capability = NotificationCapabilities(
-                simple_text_notification_supported=True)
-        capabilities = Capabilities(
-                notification_capabilities=notification_capability)
+        event = GenericEvent(device_id=self.mac)
+        event.device.friendly_name = self.hostname
+        event.device.device_kind = DEVICE_KIND_COMPUTER
+        event.device.device_status = DEVICE_STATUS_ONLINE
 
-        discovery_event = DeviceOnlineEvent(friendly_name=self.hostname,
-                                            capabilities=capabilities)
-        device_discovery_event = GenericEvent(device_id=self.mac,
-                                              device_online=discovery_event)
-        return device_discovery_event
+        capabilities = event.device.capabilities
+        capabilities.notifications.simple_text_notification_supported = True
+        capabilities.notifications.media_notification_supported = True
+        capabilities.power_state.supported_power_states[:] = [
+                POWER_OFF, SCREEN_OFF, SLEEP]
 
-    def media_event(self, media):
-        return GenericEvent(device_id=self.mac, media=media)
+        return event
+
+    def media_event(self, media_changed_event):
+        return GenericEvent(device_id=self.mac, media=media_changed_event)
 
 
 class AntonLinuxPlugin(AntonPlugin):
@@ -96,14 +101,24 @@ class AntonLinuxPlugin(AntonPlugin):
 
     def media_updated(self, player):
         media = player.current_media
-        media_event = MediaEvent(
-                player_id=player.uri, player_name=player.player_name,
-                track_name=media.title, artist=media.artist, url=media.url,
-                album_art=media.album_art_url)
-        mapping = {PlayState.PLAYING: MediaEvent.PlayStatus.PLAYING,
-                   PlayState.PAUSED: MediaEvent.PlayStatus.PAUSED,
-                   PlayState.STOPPED: MediaEvent.PlayStatus.STOPPED}
-        media_event.play_status = mapping.get(player.play_state,
-                                              MediaEvent.PlayStatus.STOPPED)
+        media_changed_event = MediaChangedEvent()
+        if player.uri:
+            media_changed_event.media.player_id = player.uri
+        if player.player_name:
+            media_changed_event.media.player_name = player.player_name
+        if media.title:
+            media_changed_event.media.track_name = media.title
+        if media.artist:
+            media_changed_event.media.artist = media.artist
+        if media.url:
+            media_changed_event.media.url = media.url
+        if media.album_art_url:
+            media_changed_event.media.album_art = media.album_art_url
 
-        self.send_event(self.event_wrapper.media_event(media_event))
+        mapping = {PlayState.PLAYING: PlayStatus.PLAYING,
+                   PlayState.PAUSED: PlayStatus.PAUSED,
+                   PlayState.STOPPED: PlayStatus.STOPPED}
+        media_changed_event.media.play_status = (
+                mapping.get(player.play_state, PlayStatus.STOPPED))
+
+        self.send_event(self.event_wrapper.media_event(media_changed_event))
