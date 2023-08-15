@@ -17,4 +17,9 @@ runtime {
         pipe_id: "events"
         pipe_type: IOT_EVENTS
     }
+    pipes {
+        pipe_id: "settings"
+        pipe_type: SETTINGS
+    }
+    data_files: "settings.pbtxt"
 }

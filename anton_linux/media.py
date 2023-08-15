@@ -4,6 +4,11 @@ import asyncio
 
 from dbus_next.errors import InterfaceNotFoundError
 
+from pyantonlib.utils import log_info
+from anton.media_pb2 import MediaChangedEvent
+
+from .interfaces import GenericController
+
 DBUS_SERVICE = 'org.freedesktop.DBus'
 DBUS_OBJECT = '/org/freedesktop/DBus'
 MPRIS_NAME_PREFIX = "org.mpris.MediaPlayer2"
@@ -36,10 +41,8 @@ class MediaState:
 
 
 class Player:
-    def __init__(self, dbus, uri, loop, callbacks):
+    def __init__(self, dbus, uri, callbacks):
         self.uri = uri
-        self.dbus = dbus
-        self.loop = loop
         self.callbacks = callbacks
         self.proxy = None
         self.media_interface = None
@@ -49,8 +52,8 @@ class Player:
         self.play_state = None
         self.player_name = None
 
-    async def connect(self):
-        self.proxy = await get_dbus_proxy(self.dbus, self.uri, MP2_OBJECT)
+    async def connect(self, context):
+        self.proxy = await get_dbus_proxy(context.dbus, self.uri, MP2_OBJECT)
         try:
             self.media_interface = self.proxy.get_interface(MEDIA_IFACE)
         except InterfaceNotFoundError as e:
@@ -77,7 +80,7 @@ class Player:
         self.player_name = await self.player_interface.get_identity()
 
     async def disconnect(self):
-        pass
+        self.proxy = None
 
     async def play(self):
         return await self.media_interface.call_play()
@@ -160,35 +163,54 @@ class Player:
                 play_state_updated_func(self)
 
 
-class MediaController:
-    PLAYER_OPENED = 'PLAYER_OPENED'
-    PLAYER_CLOSED = 'PLAYER_CLOSED'
-
-    def __init__(self, dbus, loop, callbacks):
-        self.dbus = dbus
-        self.loop = loop
+class MediaController(GenericController):
+    def on_start(self, context):
         self.players = {}
         self.recent_players = []
         self.current_player = None
-        self.callbacks = callbacks
 
-    async def start(self):
-        dbus_proxy = await get_dbus_proxy(self.dbus, DBUS_SERVICE, DBUS_OBJECT)
+        context.loop.run_until_complete(self.async_start(context))
+
+    def fill_capabilities(self, context, capabilities):
+        pass
+
+    def handle_instruction(self, context, instruction):
+        print("Handling:", instruction)
+
+    def get_instruction_handlers(self):
+        return {"media": self.handle_instruction}
+
+    async def async_start(self, context):
+        dbus_proxy = await get_dbus_proxy(context.dbus, DBUS_SERVICE,
+                                          DBUS_OBJECT)
         dbus_interface = dbus_proxy.get_interface(DBUS_SERVICE)
-        dbus_interface.on_name_owner_changed(self.refresh_players_sync)
+
+        def refresh_players(player_uri, old_owner=None, new_owner=None):
+            asyncio.ensure_future(
+                    self.refresh_players(context, player_uri, old_owner,
+                                         new_owner),
+                    loop=context.loop)
+
+        dbus_interface.on_name_owner_changed(refresh_players)
 
         for name in (await dbus_interface.call_list_names()):
-            await self.refresh_players(name, "", "dummy")
+            await self.refresh_players(context, name, "", "dummy")
 
-
-    async def refresh_players(self, player_uri, old_owner=None, new_owner=None):
+    async def refresh_players(self, context, player_uri, old_owner=None,
+                              new_owner=None):
         if not player_uri.startswith(MPRIS_NAME_PREFIX):
             return
 
+        log_info("Found MPRIS instance: " + player_uri)
+
         if new_owner and not old_owner:
-            player = Player(self.dbus, player_uri, self.loop, self.callbacks)
+            callbacks = {
+                MEDIA_UPDATED_EVENT: self.media_updated,
+                PLAYBACK_CHANGED_EVENT: self.media_updated,
+            }
+            player = Player(player_uri, context.loop, callbacks)
             try:
-                await player.connect()
+                await player.connect(context)
             except:
                 return
 
@@ -201,10 +223,29 @@ class MediaController:
             if player:
                 await player.disconnect()
 
-    def refresh_players_sync(self, player_uri, old_owner=None, new_owner=None):
-        asyncio.ensure_future(
-                self.refresh_players(player_uri, old_owner, new_owner),
-                loop=self.loop)
+    def media_updated(self, player):
+        media = player.current_media
+        media_changed_event = MediaChangedEvent()
+        if player.uri:
+            media_changed_event.media.player_id = player.uri
+        if player.player_name:
+            media_changed_event.media.player_name = player.player_name
+        if media.title:
+            media_changed_event.media.track_name = media.title
+        if media.artist:
+            media_changed_event.media.artist = media.artist
+        if media.url:
+            media_changed_event.media.url = media.url
+        if media.album_art_url:
+            media_changed_event.media.album_art = media.album_art_url
+
+        mapping = {PlayState.PLAYING: PlayStatus.PLAYING,
+                   PlayState.PAUSED: PlayStatus.PAUSED,
+                   PlayState.STOPPED: PlayStatus.STOPPED}
+        media_changed_event.media.play_status = (
+                mapping.get(player.play_state, PlayStatus.STOPPED))
+
+        self.send_event(self.event_wrapper.media_event(media_changed_event))
 
     async def play(self, uri=None):
         player = self.players.get(uri, self.current_player)
