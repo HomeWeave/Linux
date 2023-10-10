@@ -1,0 +1,81 @@
+{
+  "root": {
+    "replacement_target": "replacement_target",
+    "text": {
+      "text": "Linux Settings UI"
+    }
+  },
+  "onload_actions_list": {
+    "actions": [
+      {
+        "action_id": "get_all_settings"
+      }
+    ]
+  },
+  "subscriptions": [
+    {
+      "index": 1,
+      "actions_list": {
+        "actions": [
+          {
+            "action_id": "handle_settings_change"
+          }
+        ]
+      }
+    }
+  ],
+  "configured_actions": {
+    "get_all_settings": {
+      "actions": [
+        {
+          "apply_template_to_context_action": {
+            "template": "{ 'action': 'get_all_settings' }",
+            "target_id": "JsonStr"
+          }
+        },
+        {
+          "parse_action": {
+            "context_id": "JsonStr",
+            "target_id": "Json",
+            "string_to_json": true
+          }
+        },
+        {
+          "serialize_action": {
+            "context_id": "Json",
+            "target_id": "JsonSerialized",
+            "json": true
+          }
+        },
+        {
+          "server_action": {
+            "channel_index": 1,
+            "context_id": "JsonSerialized"
+          }
+        }
+      ]
+    },
+    "handle_settings_change": {
+      "actions": [
+        {
+          "parse_action": {
+            "context_id": "$root",
+            "string_to_json": true
+          }
+        },
+        {
+          "jq_action": {
+            "context_id": "obj",
+            "transform_expression": ".{{key}}",
+            "target_id": "{{target_id}}"
+          }
+        },
+        {
+          "debug": {
+            "context_id": "."
+          }
+        }
+      ]
+    }
+  }
+}

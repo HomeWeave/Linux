@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+from google.protobuf import json_format
 from google.protobuf import text_format
 
 from pyantonlib.channel import SettingsController
@@ -22,7 +23,7 @@ class Settings(SettingsController):
         with self.file.open() as f:
             self.props = json.load(f)
 
-        self.settings_ui_path = Path(data_dir) / 'settings.pbtxt'
+        self.settings_ui_path = Path(data_dir) / 'settings_ui.json'
 
         super().__init__({
             "get_settings_ui": self.get_settings_ui,
@@ -38,7 +39,7 @@ class Settings(SettingsController):
 
     def get_settings_ui(self, settings_request):
         with self.settings_ui_path.open() as f:
-            page = text_format.Parse(f.read(), Page())
+            page = json_format.Parse(f.read(), Page())
 
         resp = SettingsResponse(request_id=settings_request.request_id,
                                 settings_ui_response=page)
