@@ -1,4 +1,5 @@
 import json
+import base64
 from pathlib import Path
 
 from google.protobuf import json_format
@@ -51,11 +52,11 @@ class Settings(SettingsController):
             return SettingsResponse(request_id=settings_request.request_id,
                                     custom_response=CustomMessage())
 
-        request = json.loads(payload)
+        request = json.loads(base64.b64decode(payload))
 
         payload = None
         if request.get('action') == 'get_all_settings':
-            payload = json.dumps(self.props)
+            payload = base64.b64encode(json.dumps(self.props).encode())
         else:
             payload = None
 
