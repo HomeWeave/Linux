@@ -1,5 +1,5 @@
 metadata {
-    name: "anton_linux"
+    name: "Linux Plugin For Anton"
     description: "Linux Plugin for Anton"
     remote_url: "https://github.com/HomeWeave/Linux"
 }
