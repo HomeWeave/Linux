@@ -52,11 +52,11 @@ class Settings(SettingsController):
             return SettingsResponse(request_id=settings_request.request_id,
                                     custom_response=CustomMessage())
 
-        request = json.loads(base64.b64decode(payload))
+        request = json.loads(payload)
 
         payload = None
         if request.get('action') == 'get_all_settings':
-            payload = base64.b64encode(json.dumps(self.props).encode())
+            payload = json.dumps({"type": "settings", "payload": self.props})
         else:
             payload = None
 
