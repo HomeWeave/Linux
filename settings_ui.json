@@ -12,18 +12,41 @@
       }
     ]
   },
-  "subscriptions": [
-    {
-      "index": 1,
-      "actions_list": {
-        "actions": [
-          {
-            "action_id": "handle_settings_change"
-          }
-        ]
+  "subscription_info": {
+    "subscriptions": [
+      {
+        "index": 1,
+        "actions_list": {
+          "actions": [
+            {
+              "action_id": "handle_settings_change"
+            }
+          ]
+        }
       }
+    ],
+    "subscription_index_action": {
+      "actions": [
+        {
+          "jq_action": {
+            "transform_expression": "1"
+          },
+          "conditional": {
+            "jq_conditional": [".[\"$result\"].type == \"settings\""]
+          }
+        }
+      ]
+    },
+    "preprocess": {
+      "actions": [
+        {
+          "parseAction": {
+            "string_to_json": true
+          }
+        }
+      ]
     }
-  ],
+  },
   "configured_actions": {
     "get_all_settings": {
       "actions": [
@@ -58,16 +81,13 @@
     "handle_settings_change": {
       "actions": [
         {
-          "parse_action": {
-            "context_id": "$root",
-            "string_to_json": true
+          "jq_action": {
+            "transform_expression": ".payload"
           }
         },
         {
-          "jq_action": {
-            "context_id": "obj",
-            "transform_expression": ".{{key}}",
-            "target_id": "{{target_id}}"
+          "store_to_global_context_action": {
+            "target_id": "latest_settings"
           }
         },
         {
