@@ -81,11 +81,6 @@
     "handle_settings_change": {
       "actions": [
         {
-          "jq_action": {
-            "transform_expression": ".payload"
-          }
-        },
-        {
           "store_to_global_context_action": {
             "target_id": "latest_settings"
           }
