@@ -5,6 +5,7 @@ from dbus_next.aio import MessageBus
 
 
 class GenericController(object):
+
     def __init__(self, event_sender):
         self.event_sender = event_sender
 
@@ -17,13 +18,13 @@ class GenericController(object):
     def fill_capabilities(self, context, capabilities):
         pass
 
-    def handle_instruction(self, context, instruction):
+    def handle_instruction(self, context, instruction, responder):
         raise NotImplementedError
 
     def send_event(self, event):
         self.event_sender(event)
 
-    def get_instruction_handlers(self):
+    def get_handlers(self):
         raise NotImplementedError
 
 
@@ -31,4 +32,3 @@ class GenericController(object):
 class Context:
     dbus: MessageBus
     loop: Any
-

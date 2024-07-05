@@ -10,16 +10,7 @@ runtime {
         dependencies: "dbus-next"
     }
     pipes {
-        pipe_id: "instructions"
-        pipe_type: IOT_INSTRUCTION
-    }
-    pipes {
-        pipe_id: "events"
-        pipe_type: IOT_EVENTS
-    }
-    pipes {
-        pipe_id: "settings"
-        pipe_type: SETTINGS
+        pipe_type: DEFAULT
     }
     data_files: "settings_ui.json"
 }

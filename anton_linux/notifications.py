@@ -1,10 +1,11 @@
-from anton.events_pb2 import GenericEvent
+from anton.state_pb2 import DeviceState
 
 from .interfaces import GenericController
 
 
 class NotificationsController(GenericController):
-    def get_instruction_handlers(self):
+
+    def get_handlers(self):
         return {"notification": self.handle_instruction}
 
     def fill_capabilities(self, context, capabilities):
@@ -15,7 +16,5 @@ class NotificationsController(GenericController):
         subtype = instruction.notification.WhichOneof('notification_type')
         if subtype == 'standard_notification':
             os.system('notify-send "' +
-                      instruction.notification.standard_notification.text + '"')
-
-
-
+                      instruction.notification.standard_notification.text +
+                      '"')

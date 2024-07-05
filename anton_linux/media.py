@@ -5,7 +5,7 @@ import asyncio
 from dbus_next.errors import InterfaceNotFoundError
 
 from pyantonlib.utils import log_info
-from anton.media_pb2 import MediaChangedEvent
+from anton.media_pb2 import Media
 
 from .interfaces import GenericController
 
@@ -17,9 +17,9 @@ MEDIA_IFACE = "org.mpris.MediaPlayer2.Player"
 PLAYER_IFACE = "org.mpris.MediaPlayer2"
 PROPERTIES_IFACE = 'org.freedesktop.DBus.Properties'
 
-
 MEDIA_UPDATED_EVENT = 'MEDIA_UPDATED'
 PLAYBACK_CHANGED_EVENT = 'PLAYBACK_CHANGED'
+
 
 async def get_dbus_proxy(dbus, uri, path):
     introspect = await dbus.introspect(uri, path)
@@ -41,6 +41,7 @@ class MediaState:
 
 
 class Player:
+
     def __init__(self, dbus, uri, callbacks):
         self.uri = uri
         self.callbacks = callbacks
@@ -61,7 +62,7 @@ class Player:
 
         try:
             self.properties_interface = self.proxy.get_interface(
-                    PROPERTIES_IFACE)
+                PROPERTIES_IFACE)
         except InterfaceNotFoundError as e:
             raise e
 
@@ -75,8 +76,8 @@ class Player:
         self.properties_interface.on_properties_changed(self.on_state_changed)
 
         self.update_metadata(await self.media_interface.get_metadata(), {})
-        self.update_play_state(await self.media_interface.get_playback_status(),
-                               {})
+        self.update_play_state(
+            await self.media_interface.get_playback_status(), {})
         self.player_name = await self.player_interface.get_identity()
 
     async def disconnect(self):
@@ -112,7 +113,7 @@ class Player:
         changed = False
 
         if self.current_media is None:
-            self.current_media = MediaState()
+            self.current_media = Media()
 
         title = obj.get('xesam:title', None)
         title = title.value if title else '(No title)'
@@ -126,8 +127,8 @@ class Player:
         album_art_url = obj.get('mpris:artUrl', None)
         album_art_url = album_art_url.value if album_art_url else ''
 
-        if self.current_media.title != title:
-            self.current_media.title = title
+        if self.current_media.track_name != title:
+            self.current_media.track_name = title
             changed = True
 
         if self.current_media.artist != artist:
@@ -138,8 +139,8 @@ class Player:
             self.current_media.url = url
             changed = True
 
-        if self.current_media.album_art_url != album_art_url:
-            self.current_media.album_art_url = album_art_url
+        if self.current_media.album_art != album_art_url:
+            self.current_media.album_art = album_art_url
             changed = True
 
         if not changed:
@@ -157,13 +158,14 @@ class Player:
         if self.play_state != new_state:
             self.play_state = new_state
 
-            play_state_updated_func = self.callbacks.get(PLAYBACK_CHANGED_EVENT,
-                                                         None)
+            play_state_updated_func = self.callbacks.get(
+                PLAYBACK_CHANGED_EVENT, None)
             if play_state_updated_func:
                 play_state_updated_func(self)
 
 
 class MediaController(GenericController):
+
     def on_start(self, context):
         self.players = {}
         self.recent_players = []
@@ -177,7 +179,7 @@ class MediaController(GenericController):
     def handle_instruction(self, context, instruction):
         print("Handling:", instruction)
 
-    def get_instruction_handlers(self):
+    def get_handlers(self):
         return {"media": self.handle_instruction}
 
     async def async_start(self, context):
@@ -186,17 +188,19 @@ class MediaController(GenericController):
         dbus_interface = dbus_proxy.get_interface(DBUS_SERVICE)
 
         def refresh_players(player_uri, old_owner=None, new_owner=None):
-            asyncio.ensure_future(
-                    self.refresh_players(context, player_uri, old_owner,
-                                         new_owner),
-                    loop=context.loop)
+            asyncio.ensure_future(self.refresh_players(context, player_uri,
+                                                       old_owner, new_owner),
+                                  loop=context.loop)
 
         dbus_interface.on_name_owner_changed(refresh_players)
 
         for name in (await dbus_interface.call_list_names()):
             await self.refresh_players(context, name, "", "dummy")
 
-    async def refresh_players(self, context, player_uri, old_owner=None,
+    async def refresh_players(self,
+                              context,
+                              player_uri,
+                              old_owner=None,
                               new_owner=None):
         if not player_uri.startswith(MPRIS_NAME_PREFIX):
             return
@@ -225,7 +229,7 @@ class MediaController(GenericController):
 
     def media_updated(self, player):
         media = player.current_media
-        media_changed_event = MediaChangedEvent()
+        media_changed_event = Media()
         if player.uri:
             media_changed_event.media.player_id = player.uri
         if player.player_name:
@@ -239,11 +243,13 @@ class MediaController(GenericController):
         if media.album_art_url:
             media_changed_event.media.album_art = media.album_art_url
 
-        mapping = {PlayState.PLAYING: PlayStatus.PLAYING,
-                   PlayState.PAUSED: PlayStatus.PAUSED,
-                   PlayState.STOPPED: PlayStatus.STOPPED}
-        media_changed_event.media.play_status = (
-                mapping.get(player.play_state, PlayStatus.STOPPED))
+        mapping = {
+            PlayState.PLAYING: PlayStatus.PLAYING,
+            PlayState.PAUSED: PlayStatus.PAUSED,
+            PlayState.STOPPED: PlayStatus.STOPPED
+        }
+        media_changed_event.media.play_status = (mapping.get(
+            player.play_state, PlayStatus.STOPPED))
 
         self.send_event(self.event_wrapper.media_event(media_changed_event))
 
