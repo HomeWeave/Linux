@@ -42,7 +42,7 @@ class MediaState:
 
 class Player:
 
-    def __init__(self, dbus, uri, callbacks):
+    def __init__(self, uri, callbacks):
         self.uri = uri
         self.callbacks = callbacks
         self.proxy = None
@@ -212,7 +212,7 @@ class MediaController(GenericController):
                 MEDIA_UPDATED_EVENT: self.media_updated,
                 PLAYBACK_CHANGED_EVENT: self.media_updated,
             }
-            player = Player(player_uri, context.loop, callbacks)
+            player = Player(player_uri, callbacks)
             try:
                 await player.connect(context)
             except:
