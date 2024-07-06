@@ -5,9 +5,8 @@ from dbus_next.aio import MessageBus
 
 
 class GenericController(object):
-
-    def __init__(self, event_sender):
-        self.event_sender = event_sender
+    def __init__(self, channel):
+        self.channel = channel
 
     def on_start(self, context):
         pass
@@ -20,9 +19,6 @@ class GenericController(object):
 
     def handle_instruction(self, context, instruction, responder):
         raise NotImplementedError
-
-    def send_event(self, event):
-        self.event_sender(event)
 
     def get_handlers(self):
         raise NotImplementedError

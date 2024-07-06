@@ -8,14 +8,14 @@ from .interfaces import GenericController
 class DevicePowerController(GenericController):
 
     def fill_capabilities(self, context, capabilities):
-        capabilities.power_state.supported_power_states[:] = [
+        capabilities.power_state.supported_power_instructions[:] = [
             POWER_OFF, SCREEN_OFF, SLEEP
         ]
 
     def get_handlers(self):
-        return {"power_state": self.handle_power_instruction}
+        return {"power_instruction": self.handle_power_instruction}
 
     def handle_power_instruction(self, instruction):
-        if instruction.power_state == SCREEN_OFF:
+        if instruction.power_instruction == SCREEN_OFF:
             # For X only.
             os.system("xset dpms force off")

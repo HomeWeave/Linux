@@ -9,6 +9,7 @@ from dbus_next.aio import MessageBus
 
 from pyantonlib.plugin import AntonPlugin
 from pyantonlib.channel import DeviceHandlerBase, SettingsHandlerBase
+from pyantonlib.channel import DefaultProtoChannel
 from pyantonlib.utils import log_info
 from anton.state_pb2 import DeviceState
 from anton.plugin_messages_pb2 import GenericPluginToPlatformMessage
@@ -27,28 +28,33 @@ class LocalLinuxInstance(DeviceHandlerBase):
         MediaController, DevicePowerController, NotificationsController
     ]
 
-    def __init__(self):
+    def __init__(self, context):
+        self.context = context
         self.channel = None  # Will be set by DefaultProtoChannel.
-        self.controllers = [x() for x in self.CONTROLLERS]
+
+    def on_start(self):
+        self.controllers = [x(self.channel) for x in self.CONTROLLERS]
         self.handlers = {
             key: value
             for controller in self.controllers
-            for key, value in controller.get_handlers()
+            for key, value in controller.get_handlers().items()
         }
 
-    def on_start(self):
         event = DeviceState()
-        event.device.friendly_name = socket.gethostname()
-        event.device.device_kind = DEVICE_KIND_COMPUTER
-        event.device.device_status = DEVICE_STATUS_ONLINE
+        event.friendly_name = socket.gethostname()
+        event.kind = DEVICE_KIND_COMPUTER
+        event.device_status = DEVICE_STATUS_ONLINE
 
         for controller in self.controllers:
             controller.on_start(self.context)
             controller.fill_capabilities(self.context,
-                                         event.device.capabilities)
+                                         event.capabilities)
 
         req = GenericPluginToPlatformMessage(device_state_updated=event)
         self.channel.query(req, lambda resp: None)
+
+        for controller in self.controllers:
+            controller.on_start(self.context)
 
     def handle_instruction(self, msg, responder):
         pass
@@ -62,9 +68,43 @@ class SettingsHandler(SettingsHandlerBase):
     def __init__(self, path):
         self.channel = None  # Will be set by DefaultProtoChannel.
         self.path = path
+        self.settings = Settings(path)
 
     def on_request(self, msg, responder):
-        pass
+        settings_request = msg.settings_request
+
+        if settings_request.WhichOneof('request_type') == 'get_settings_ui':
+            responder(GenericPluginToPlatformMessage(
+                settings_response=SettingsResponse(
+                    settings_ui_response=self.settings.get_settings_ui()),
+                request_id=msg.request_id))
+            return
+
+        if settings_request.WhichOneof('request_type') == 'custom_request':
+            res = self.handle_custom_request(settings_request.custom_request)
+            responder(GenericPluginToPlatformMessage(
+                settings_response=SettingsResponse(custom_response=res),
+                request_id=msg.request_id))
+            return
+
+    def handle_custom_request(self, custom_request):
+        payload = custom_request.payload
+        if payload is None:
+            return CustomMessage()
+
+        request = json.loads(payload)
+
+        payload = None
+        if request.get('action') == 'get_all_settings':
+            payload = json.dumps({
+                "type": "settings",
+                "payload": self.settings.props
+            })
+        else:
+            payload = None
+
+        return CustomMessage(index=custom_request.index, payload=payload)
+
 
 
 class Channel(DefaultProtoChannel):
@@ -74,16 +114,16 @@ class Channel(DefaultProtoChannel):
 class AntonLinuxPlugin(AntonPlugin):
 
     def setup(self, plugin_startup_info):
-        self.device_handler = LocalLinuxInstance()
-        settings_handler = SettingsHandlerBase(plugin_startup_info.data_dir)
-        self.channel = Channel(device_handler, settings_handler)
-
-        registry = self.channel_registrar()
-        registry.register_controller(PipeType.DEFAULT, self.channel)
-
         self.context = Context(loop=asyncio.get_event_loop(),
                                dbus=MessageBus())
         self.loop_thread = Thread(target=self.context.loop.run_forever)
+
+        self.device_handler = LocalLinuxInstance(self.context)
+        self.settings_handler = SettingsHandler(plugin_startup_info.data_dir)
+        self.channel = Channel(self.device_handler, self.settings_handler)
+
+        registry = self.channel_registrar()
+        registry.register_controller(PipeType.DEFAULT, self.channel)
 
     def on_start(self):
         self.context.loop.run_until_complete(self.context.dbus.connect())
