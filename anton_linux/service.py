@@ -12,6 +12,7 @@ from pyantonlib.channel import DeviceHandlerBase, SettingsHandlerBase
 from pyantonlib.channel import DefaultProtoChannel
 from pyantonlib.utils import log_info
 from anton.state_pb2 import DeviceState
+from anton.settings_pb2 import SettingsResponse
 from anton.plugin_messages_pb2 import GenericPluginToPlatformMessage
 from anton.plugin_pb2 import PipeType
 from anton.device_pb2 import DEVICE_STATUS_ONLINE, DEVICE_KIND_COMPUTER
@@ -47,8 +48,7 @@ class LocalLinuxInstance(DeviceHandlerBase):
 
         for controller in self.controllers:
             controller.on_start(self.context)
-            controller.fill_capabilities(self.context,
-                                         event.capabilities)
+            controller.fill_capabilities(self.context, event.capabilities)
 
         req = GenericPluginToPlatformMessage(device_state_updated=event)
         self.channel.query(req, lambda resp: None)
@@ -74,17 +74,19 @@ class SettingsHandler(SettingsHandlerBase):
         settings_request = msg.settings_request
 
         if settings_request.WhichOneof('request_type') == 'get_settings_ui':
-            responder(GenericPluginToPlatformMessage(
-                settings_response=SettingsResponse(
-                    settings_ui_response=self.settings.get_settings_ui()),
-                request_id=msg.request_id))
+            responder(
+                GenericPluginToPlatformMessage(
+                    settings_response=SettingsResponse(
+                        settings_ui_response=self.settings.get_settings_ui()),
+                    request_id=msg.request_id))
             return
 
         if settings_request.WhichOneof('request_type') == 'custom_request':
             res = self.handle_custom_request(settings_request.custom_request)
-            responder(GenericPluginToPlatformMessage(
-                settings_response=SettingsResponse(custom_response=res),
-                request_id=msg.request_id))
+            responder(
+                GenericPluginToPlatformMessage(
+                    settings_response=SettingsResponse(custom_response=res),
+                    request_id=msg.request_id))
             return
 
     def handle_custom_request(self, custom_request):
@@ -104,7 +106,6 @@ class SettingsHandler(SettingsHandlerBase):
             payload = None
 
         return CustomMessage(index=custom_request.index, payload=payload)
-
 
 
 class Channel(DefaultProtoChannel):

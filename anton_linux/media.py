@@ -5,7 +5,10 @@ import asyncio
 from dbus_next.errors import InterfaceNotFoundError
 
 from pyantonlib.utils import log_info
-from anton.media_pb2 import Media
+from anton.call_status_pb2 import Status
+from anton.state_pb2 import DeviceState
+from anton.media_pb2 import Media, PlayStatus
+from anton.plugin_messages_pb2 import GenericPluginToPlatformMessage
 
 from .interfaces import GenericController
 
@@ -118,8 +121,11 @@ class Player:
         title = obj.get('xesam:title', None)
         title = title.value if title else '(No title)'
 
-        artist = obj.get('xesam:artist', None)
-        artist = artist.value if artist else '(No artist)'
+        artist_obj = obj.get('xesam:artist', None)
+        if not artist_obj or not artist_obj.value or not artist_obj.value[0]:
+            artist = None
+        else:
+            artist = artist_obj.value[0]
 
         url = obj.get('xesam:url', None)
         url = url.value if url else ''
@@ -230,28 +236,33 @@ class MediaController(GenericController):
     def media_updated(self, player):
         media = player.current_media
         media_changed_event = Media()
-        if player.uri:
-            media_changed_event.media.player_id = player.uri
+        media_changed_event.player_id = player.uri
         if player.player_name:
-            media_changed_event.media.player_name = player.player_name
-        if media.title:
-            media_changed_event.media.track_name = media.title
+            media_changed_event.player_name = player.player_name
+        if media.track_name:
+            media_changed_event.track_name = media.track_name
         if media.artist:
-            media_changed_event.media.artist = media.artist
+            media_changed_event.artist = media.artist
         if media.url:
-            media_changed_event.media.url = media.url
-        if media.album_art_url:
-            media_changed_event.media.album_art = media.album_art_url
+            media_changed_event.url = media.url
+        if media.album_art:
+            media_changed_event.album_art = media.album_art
 
         mapping = {
             PlayState.PLAYING: PlayStatus.PLAYING,
             PlayState.PAUSED: PlayStatus.PAUSED,
             PlayState.STOPPED: PlayStatus.STOPPED
         }
-        media_changed_event.media.play_status = (mapping.get(
-            player.play_state, PlayStatus.STOPPED))
+        media_changed_event.play_status = mapping.get(player.play_state,
+                                                      PlayStatus.STOPPED)
 
-        self.send_event(self.event_wrapper.media_event(media_changed_event))
+        def callback(status):
+            if status.call_status.code != Status.STATUS_OK:
+                print("Failed to report Media Update:", status)
+
+        self.channel.query(
+            GenericPluginToPlatformMessage(device_state_updated=DeviceState(
+                media_state=[media_changed_event])), callback)
 
     async def play(self, uri=None):
         player = self.players.get(uri, self.current_player)
