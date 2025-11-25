@@ -4,7 +4,7 @@ import asyncio
 
 from dbus_next.errors import InterfaceNotFoundError
 
-from pyantonlib.utils import log_info
+from pyantonlib.utils import log_info, log_warn
 from anton.call_status_pb2 import Status
 from anton.state_pb2 import DeviceState
 from anton.media_pb2 import Media, PlayStatus
@@ -105,7 +105,7 @@ class Player:
         print("Seek: ", time)
 
     def on_state_changed(self, iface, new_data, old_props):
-        # print("New:", new_data)
+        print("New:", new_data)
         if 'Metadata' in new_data:
             self.update_metadata(new_data['Metadata'].value, old_props)
 
@@ -180,13 +180,11 @@ class MediaController(GenericController):
         context.loop.run_until_complete(self.async_start(context))
 
     def fill_capabilities(self, context, capabilities):
-        pass
+        for players in self.player.values():
+            players.fill_capabilities(capabilities)
 
-    def handle_instruction(self, context, instruction):
+    def handle_set_device_state(self, state, callback):
         print("Handling:", instruction)
-
-    def get_handlers(self):
-        return {"media": self.handle_instruction}
 
     async def async_start(self, context):
         dbus_proxy = await get_dbus_proxy(context.dbus, DBUS_SERVICE,
@@ -221,7 +219,9 @@ class MediaController(GenericController):
             player = Player(player_uri, callbacks)
             try:
                 await player.connect(context)
-            except:
+                log_info("Connected to MPRIS instance: " + player_uri)
+            except Exception as e:
+                log_warn("Unable to connect to: " + player_uri + ". " + str(e))
                 return
 
             self.players[player_uri] = player
@@ -234,6 +234,7 @@ class MediaController(GenericController):
                 await player.disconnect()
 
     def media_updated(self, player):
+        log_info("Media updated..")
         media = player.current_media
         media_changed_event = Media()
         media_changed_event.player_id = player.uri
@@ -256,13 +257,8 @@ class MediaController(GenericController):
         media_changed_event.play_status = mapping.get(player.play_state,
                                                       PlayStatus.STOPPED)
 
-        def callback(status):
-            if status.call_status.code != Status.STATUS_OK:
-                print("Failed to report Media Update:", status)
-
-        self.channel.query(
-            GenericPluginToPlatformMessage(device_state_updated=DeviceState(
-                media_state=[media_changed_event])), callback)
+        self.device_handler.send_device_state_updated(
+            DeviceState(media_state=[media_changed_event]))
 
     async def play(self, uri=None):
         player = self.players.get(uri, self.current_player)
