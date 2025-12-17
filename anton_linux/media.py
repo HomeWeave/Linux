@@ -7,7 +7,7 @@ from dbus_next.errors import InterfaceNotFoundError
 from pyantonlib.utils import log_info, log_warn
 from anton.call_status_pb2 import Status
 from anton.state_pb2 import DeviceState
-from anton.media_pb2 import Media, PlayStatus
+from anton.media_pb2 import Media, PlayStatus, PlayerCapabilities
 from anton.plugin_messages_pb2 import GenericPluginToPlatformMessage
 
 from .interfaces import GenericController
@@ -82,6 +82,11 @@ class Player:
         self.update_play_state(
             await self.media_interface.get_playback_status(), {})
         self.player_name = await self.player_interface.get_identity()
+
+    def fill_capabilities(self, player_capabilities):
+        player_capabilities.supported_states[:] = [
+            PlayStatus.PLAYING, PlayStatus.PAUSED, PlayStatus.STOPPED
+        ]
 
     async def disconnect(self):
         self.proxy = None
@@ -180,8 +185,12 @@ class MediaController(GenericController):
         context.loop.run_until_complete(self.async_start(context))
 
     def fill_capabilities(self, context, capabilities):
-        for players in self.player.values():
-            players.fill_capabilities(capabilities)
+        for key, players in self.players.items():
+            capability = PlayerCapabilities()
+            capability.player_id = key
+            players.fill_capabilities(capability)
+
+            capabilities.player_capabilities.append(capability)
 
     def handle_set_device_state(self, state, callback):
         print("Handling:", instruction)
