@@ -21,6 +21,9 @@ class GenericController(object):
     def handle_set_device_state(self, state, callback):
         raise NotImplementedError
 
+    def handle_instruction(self, state, callback):
+        raise NotImplementedError
+
 
 @dataclass
 class Context:

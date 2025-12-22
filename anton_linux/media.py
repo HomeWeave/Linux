@@ -1,14 +1,14 @@
-from dataclasses import dataclass
-from enum import Enum
 import asyncio
+import os
 
 from dbus_next.errors import InterfaceNotFoundError
 
 from pyantonlib.utils import log_info, log_warn
 from anton.call_status_pb2 import Status
 from anton.state_pb2 import DeviceState
-from anton.media_pb2 import Media, PlayStatus, PlayerCapabilities
+from anton.media_pb2 import Media, PlayStatus, PlayerCapabilities, Image
 from anton.plugin_messages_pb2 import GenericPluginToPlatformMessage
+from pyantonlib.exceptions import ResourceNotFound
 
 from .interfaces import GenericController
 
@@ -29,18 +29,20 @@ async def get_dbus_proxy(dbus, uri, path):
     return dbus.get_proxy_object(uri, path, introspect)
 
 
-class PlayState(Enum):
-    PLAYING = 0
-    PAUSED = 1
-    STOPPED = 2
-
-
-@dataclass
-class MediaState:
-    title: str = None
-    artist: str = None
-    url: str = None
-    album_art_url: str = None
+def get_album_art(url):
+    img = Image()
+    if url.startswith("file://"):
+        local_path = url.replace("file://", "")
+        if os.path.exists(local_path):
+            try:
+                with open(local_path, "rb") as f:
+                    img.data_raw = f.read()
+                    img.mime_type = "image/jpeg"  # Default or sniff mime
+            except Exception:
+                img.url = ""  # Fallback
+    else:
+        img.url = url
+    return img
 
 
 class Player:
@@ -49,39 +51,30 @@ class Player:
         self.uri = uri
         self.callbacks = callbacks
         self.proxy = None
-        self.media_interface = None
-        self.properties_interface = None
+        self.media_iface = None
+        self.prop_iface = None
+        self.root_iface = None
 
-        self.current_media = None
-        self.play_state = None
-        self.player_name = None
+        self.player_name = "Unknown Player"
+        self.play_status = PlayStatus.STOPPED
+        self.current_media = Media()
+        self.capabilities = PlayerCapabilities(player_id=uri)
 
     async def connect(self, context):
         self.proxy = await get_dbus_proxy(context.dbus, self.uri, MP2_OBJECT)
-        try:
-            self.media_interface = self.proxy.get_interface(MEDIA_IFACE)
-        except InterfaceNotFoundError as e:
-            raise e
 
-        try:
-            self.properties_interface = self.proxy.get_interface(
-                PROPERTIES_IFACE)
-        except InterfaceNotFoundError as e:
-            raise e
+        self.media_iface = self.proxy.get_interface(MEDIA_IFACE)
+        self.prop_iface = self.proxy.get_interface(PROPERTIES_IFACE)
+        self.root_iface = self.proxy.get_interface(PLAYER_IFACE)
 
-        try:
-            self.player_interface = self.proxy.get_interface(PLAYER_IFACE)
-        except InterfaceNotFoundError as e:
-            raise e
+        self.prop_iface.on_properties_changed(self._on_dbus_properties_changed)
+        props = await self.prop_iface.call_get_all(MEDIA_IFACE)
+        root_props = await self.prop_iface.call_get_all(PLAYER_IFACE)
 
+        self.player_name = root_props.get('Identity').value or "Unknown Player"
+        self._update_capabilities(root_props)
+        self._update_internal_state(props)
         print("Connected to:", self.uri)
-        self.media_interface.on_seeked(self.on_seeked)
-        self.properties_interface.on_properties_changed(self.on_state_changed)
-
-        self.update_metadata(await self.media_interface.get_metadata(), {})
-        self.update_play_state(
-            await self.media_interface.get_playback_status(), {})
-        self.player_name = await self.player_interface.get_identity()
 
     def fill_capabilities(self, player_capabilities):
         player_capabilities.supported_states[:] = [
@@ -92,90 +85,90 @@ class Player:
         self.proxy = None
 
     async def play(self):
-        return await self.media_interface.call_play()
+        return await self.media_iface.call_play()
 
     async def pause(self):
-        return await self.media_interface.call_pause()
+        return await self.media_iface.call_pause()
 
     async def next(self):
-        return await self.media_interface.call_next()
+        return await self.media_iface.call_next()
 
     async def previous(self):
-        return await self.media_interface.call_previous()
+        return await self.media_iface.call_previous()
 
     async def stop(self):
-        return await self.media_interface.stop()
+        return await self.media_iface.stop()
 
-    def on_seeked(self, time):
-        print("Seek: ", time)
+    def _on_dbus_properties_changed(self, iface, changed, invalidated):
+        if iface == MEDIA_IFACE:
+            self._update_internal_state(changed)
+        elif iface == PLAYER_IFACE:
+            self._update_capabilities(changed)
 
-    def on_state_changed(self, iface, new_data, old_props):
-        print("New:", new_data)
-        if 'Metadata' in new_data:
-            self.update_metadata(new_data['Metadata'].value, old_props)
+    def _update_capabilities(self, root_props):
+        self.capabilities.supports_play_next = (
+            'CanGoNext' in root_props and root_props.get('CanGoNext').value
+            or False)
+        self.capabilities.supports_play_now = (
+            'CanControl' in root_props and root_props.get('CanControl').value
+            or False)
 
-        if 'PlaybackStatus' in new_data:
-            self.update_play_state(new_data['PlaybackStatus'].value, old_props)
+        states = [PlayStatus.STOPPED]
+        if 'CanPlay' in root_props and root_props.get('CanPlay').value:
+            states.append(PlayStatus.PLAYING)
+        if 'CanPause' in root_props and root_props.get('CanPause').value:
+            states.append(PlayStatus.PAUSED)
+        self.capabilities.supported_states[:] = states
 
-    def update_metadata(self, obj, old_props):
+    def _update_internal_state(self, changed_props):
         changed = False
 
-        if self.current_media is None:
-            self.current_media = Media()
+        if 'PlaybackStatus' in changed_props:
+            val = changed_props['PlaybackStatus'].value.upper()
+            mapping = {
+                "PLAYING": PlayStatus.PLAYING,
+                "PAUSED": PlayStatus.PAUSED,
+                "STOPPED": PlayStatus.STOPPED
+            }
+            new_status = mapping.get(val, PlayStatus.PLAY_STATUS_UNKNOWN)
+            if self.play_status != new_status:
+                self.play_status = new_status
+                changed = True
 
-        title = obj.get('xesam:title', None)
-        title = title.value if title else '(No title)'
+        if 'Metadata' in changed_props:
+            meta = changed_props['Metadata'].value
 
-        artist_obj = obj.get('xesam:artist', None)
-        if not artist_obj or not artist_obj.value or not artist_obj.value[0]:
-            artist = None
-        else:
-            artist = artist_obj.value[0]
+            title = ('xesam:title' in meta and meta.get('xesam:title').value
+                     or "Unknown Track")
+            if self.current_media.track_name != title:
+                self.current_media.track_name = title
+                changed = True
 
-        url = obj.get('xesam:url', None)
-        url = url.value if url else ''
+            artists = 'xesam:artist' in meta and meta.get(
+                'xesam:artist').value or []
+            artist_str = artists[0] if artists else "Unknown Artist"
+            if self.current_media.artist != artist_str:
+                self.current_media.artist = artist_str
+                changed = True
 
-        album_art_url = obj.get('mpris:artUrl', None)
-        album_art_url = album_art_url.value if album_art_url else ''
+            art_url = 'mpris:artUrl' in meta and meta.get(
+                'mpris:artUrl').value or ""
+            if art_url:
+                new_img = get_album_art(art_url)
+                if self.current_media.album_art.SerializeToString(
+                ) != new_img.SerializeToString():
+                    self.current_media.album_art.CopyFrom(new_img)
+                    changed = True
 
-        if self.current_media.track_name != title:
-            self.current_media.track_name = title
-            changed = True
-
-        if self.current_media.artist != artist:
-            self.current_media.artist = artist
-            changed = True
-
-        if self.current_media.url != url:
-            self.current_media.url = url
-            changed = True
-
-        if self.current_media.album_art != album_art_url:
-            self.current_media.album_art = album_art_url
-            changed = True
-
-        if not changed:
-            return
-
-        media_updated_func = self.callbacks.get(MEDIA_UPDATED_EVENT, None)
-        if media_updated_func:
-            media_updated_func(self)
-
-    def update_play_state(self, obj, old_props):
-        changed = False
-
-        new_state = PlayState[obj.upper()]
-
-        if self.play_state != new_state:
-            self.play_state = new_state
-
-            play_state_updated_func = self.callbacks.get(
-                PLAYBACK_CHANGED_EVENT, None)
-            if play_state_updated_func:
-                play_state_updated_func(self)
+        if changed and MEDIA_UPDATED_EVENT in self.callbacks:
+            self.callbacks[MEDIA_UPDATED_EVENT](self)
 
 
 class MediaController(GenericController):
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.players = {}
 
     def on_start(self, context):
         self.players = {}
@@ -185,12 +178,8 @@ class MediaController(GenericController):
         context.loop.run_until_complete(self.async_start(context))
 
     def fill_capabilities(self, context, capabilities):
-        for key, players in self.players.items():
-            capability = PlayerCapabilities()
-            capability.player_id = key
-            players.fill_capabilities(capability)
-
-            capabilities.player_capabilities.append(capability)
+        for player in self.players.values():
+            capabilities.media.player_capabilities.append(player.capabilities)
 
     def handle_set_device_state(self, state, callback):
         print("Handling:", instruction)
@@ -242,49 +231,51 @@ class MediaController(GenericController):
             if player:
                 await player.disconnect()
 
+        self.device_handler.report_capabilities()
+
     def media_updated(self, player):
         log_info("Media updated..")
-        media = player.current_media
         media_changed_event = Media()
+        media_changed_event.CopyFrom(player.current_media)
         media_changed_event.player_id = player.uri
-        if player.player_name:
-            media_changed_event.player_name = player.player_name
-        if media.track_name:
-            media_changed_event.track_name = media.track_name
-        if media.artist:
-            media_changed_event.artist = media.artist
-        if media.url:
-            media_changed_event.url = media.url
-        if media.album_art:
-            media_changed_event.album_art = media.album_art
-
-        mapping = {
-            PlayState.PLAYING: PlayStatus.PLAYING,
-            PlayState.PAUSED: PlayStatus.PAUSED,
-            PlayState.STOPPED: PlayStatus.STOPPED
-        }
-        media_changed_event.play_status = mapping.get(player.play_state,
-                                                      PlayStatus.STOPPED)
+        media_changed_event.player_name = player.player_name
+        media_changed_event.play_status = player.play_status
 
         self.device_handler.send_device_state_updated(
             DeviceState(media_state=[media_changed_event]))
 
-    async def play(self, uri=None):
-        player = self.players.get(uri, self.current_player)
-        return await self.current_player.play()
+    def handle_instruction(self, instruction, callback):
+        log_info("Handling instruction: " + str(instruction))
+        if instruction.HasField('playlist_instruction'):
+            playlist_instruction = instruction.playlist_instruction
+            player = self.get_player(playlist_instruction.player_id)
+            handle_playlist_instruction(player, playlist_instruction, callback)
 
-    async def pause(self, uri=None):
-        player = self.players.get(uri, self.current_player)
-        return await self.current_player.pause()
+        if instruction.HasField('media_instruction'):
+            media_instruction = instruction.media_instruction
+            player = self.get_player(media_instruction.player_id)
+            handle_media_instruction(player, media_instruction, callback)
 
-    async def stop(self, uri=None):
-        player = self.players.get(uri, self.current_player)
-        return await self.current_player.stop()
+        if instruction.HasField('volume_instruction'):
+            volume_instruction = instruction.volume_instruction
+            handle_volume_instruction(volume_instruction, callback)
 
-    async def next(self):
-        player = self.players.get(uri, self.current_player)
-        return await self.current_player.next()
+    def get_player(self, uri):
+        player = self.players.get(uri, None)
+        if player is None:
+            raise ResourceNotFound(uri)
+        return player
 
-    async def previous(self):
-        player = self.players.get(uri, self.current_player)
-        return await self.current_player.previous()
+
+def handle_playlist_instruction(player, playlist_instruction, callback):
+    if playlist_instruction.WhichOneof('type') == 'next_track':
+        asyncio.run(player.next())
+        callback(None)
+
+
+def handle_media_instruction(player, media_instruction, callback):
+    if media_instruction.play_state_instruction == PlayStatus.PAUSED:
+        asyncio.run(player.pause())
+    elif media_instruction.play_state_instruction == PlayStatus.PLAYING:
+        asyncio.run(player.play())
+    callback(None)

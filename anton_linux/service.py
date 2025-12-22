@@ -37,21 +37,35 @@ class LocalLinuxInstance(DeviceHandlerBase):
 
     def on_start(self):
         self.controllers = [x(self) for x in self.CONTROLLERS]
+        self.report_capabilities()
 
+        for controller in self.controllers:
+            controller.on_start(self.context)
+
+    def report_capabilities(self):
         event = DeviceState()
         event.friendly_name = socket.gethostname()
         event.kind = DEVICE_KIND_COMPUTER
         event.device_status = DEVICE_STATUS_ONLINE
 
         for controller in self.controllers:
-            controller.on_start(self.context)
             controller.fill_capabilities(self.context, event.capabilities)
 
         self.send_device_state_updated(event)
 
     def handle_set_device_state(self, state, callback):
         for controller in self.controllers:
-            controller.handle_set_device_state(state, callback)
+            try:
+                controller.handle_set_device_state(state, callback)
+            except NotImplementedError:
+                pass
+
+    def handle_instruction(self, instruction, responder):
+        for controller in self.controllers:
+            try:
+                controller.handle_instruction(instruction, responder)
+            except NotImplementedError:
+                pass
 
     def send_device_state_updated(self, state):
         state.device_id = str(getnode())
