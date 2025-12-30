@@ -6,7 +6,7 @@ from dbus_next.errors import InterfaceNotFoundError
 from pyantonlib.utils import log_info, log_warn
 from anton.call_status_pb2 import Status
 from anton.state_pb2 import DeviceState
-from anton.media_pb2 import Media, PlayStatus, PlayerCapabilities, Image
+from anton.media_pb2 import Media, PlayStatus, PlayerCapabilities, Image, VolumeControl
 from anton.plugin_messages_pb2 import GenericPluginToPlatformMessage
 from pyantonlib.exceptions import ResourceNotFound
 
@@ -182,7 +182,7 @@ class MediaController(GenericController):
             capabilities.media.player_capabilities.append(player.capabilities)
 
     def handle_set_device_state(self, state, callback):
-        print("Handling:", instruction)
+        print("Handling:", state)
 
     async def async_start(self, context):
         dbus_proxy = await get_dbus_proxy(context.dbus, DBUS_SERVICE,
@@ -256,7 +256,8 @@ class MediaController(GenericController):
             player = self.get_player(media_instruction.player_id)
             handle_media_instruction(player, media_instruction, callback)
 
-        if instruction.HasField('volume_instruction'):
+        if (instruction.volume_instruction
+                != VolumeControl.VOLUME_CONTROL_UNKNOWN):
             volume_instruction = instruction.volume_instruction
             handle_volume_instruction(volume_instruction, callback)
 
