@@ -23,9 +23,85 @@ PROPERTIES_IFACE = 'org.freedesktop.DBus.Properties'
 MEDIA_UPDATED_EVENT = 'MEDIA_UPDATED'
 PLAYBACK_CHANGED_EVENT = 'PLAYBACK_CHANGED'
 
+MPRIS_XML = """
+<node>
+  <interface name="org.mpris.MediaPlayer2">
+    <method name="Raise"/>
+    <method name="Quit"/>
+    <property name="CanQuit" type="b" access="read"/>
+    <property name="CanRaise" type="b" access="read"/>
+    <property name="HasTrackList" type="b" access="read"/>
+    <property name="Identity" type="s" access="read"/>
+    <property name="DesktopEntry" type="s" access="read"/>
+    <property name="SupportedUriSchemes" type="as" access="read"/>
+    <property name="SupportedMimeTypes" type="as" access="read"/>
+  </interface>
+  <interface name="org.mpris.MediaPlayer2.Player">
+    <method name="Next"/>
+    <method name="Previous"/>
+    <method name="Pause"/>
+    <method name="PlayPause"/>
+    <method name="Stop"/>
+    <method name="Play"/>
+    <method name="Seek">
+      <arg direction="in" name="Offset" type="x"/>
+    </method>
+    <method name="SetPosition">
+      <arg direction="in" name="TrackId" type="o"/>
+      <arg direction="in" name="Position" type="x"/>
+    </method>
+    <method name="OpenUri">
+      <arg direction="in" name="Uri" type="s"/>
+    </method>
+    <signal name="Seeked">
+      <arg name="Position" type="x"/>
+    </signal>
+    <property name="PlaybackStatus" type="s" access="read"/>
+    <property name="LoopStatus" type="s" access="readwrite"/>
+    <property name="Rate" type="d" access="readwrite"/>
+    <property name="Shuffle" type="b" access="readwrite"/>
+    <property name="Metadata" type="a{sv}" access="read"/>
+    <property name="Volume" type="d" access="readwrite"/>
+    <property name="Position" type="x" access="read"/>
+    <property name="MinimumRate" type="d" access="read"/>
+    <property name="MaximumRate" type="d" access="read"/>
+    <property name="CanGoNext" type="b" access="read"/>
+    <property name="CanGoPrevious" type="b" access="read"/>
+    <property name="CanPlay" type="b" access="read"/>
+    <property name="CanPause" type="b" access="read"/>
+    <property name="CanSeek" type="b" access="read"/>
+    <property name="CanControl" type="b" access="read"/>
+  </interface>
+  <interface name="org.freedesktop.DBus.Properties">
+    <method name="Get">
+      <arg direction="in" name="interface_name" type="s"/>
+      <arg direction="in" name="property_name" type="s"/>
+      <arg direction="out" name="value" type="v"/>
+    </method>
+    <method name="GetAll">
+      <arg direction="in" name="interface_name" type="s"/>
+      <arg direction="out" name="props" type="a{sv}"/>
+    </method>
+    <method name="Set">
+      <arg direction="in" name="interface_name" type="s"/>
+      <arg direction="in" name="property_name" type="s"/>
+      <arg direction="in" name="value" type="v"/>
+    </method>
+    <signal name="PropertiesChanged">
+      <arg name="interface_name" type="s"/>
+      <arg name="changed_properties" type="a{sv}"/>
+      <arg name="invalidated_properties" type="as"/>
+    </signal>
+  </interface>
+</node>
+"""
+
 
 async def get_dbus_proxy(dbus, uri, path):
     introspect = await dbus.introspect(uri, path)
+    if not introspect.interfaces:
+        # Fallback to hardcoded MPRIS XML if introspection returns no interfaces
+        return dbus.get_proxy_object(uri, path, MPRIS_XML)
     return dbus.get_proxy_object(uri, path, introspect)
 
 
@@ -37,9 +113,9 @@ def get_album_art(url):
             try:
                 with open(local_path, "rb") as f:
                     img.data_raw = f.read()
-                    img.mime_type = "image/jpeg"  # Default or sniff mime
+                    img.mime_type = "image/jpeg"
             except Exception:
-                img.url = ""  # Fallback
+                img.url = ""
     else:
         img.url = url
     return img
@@ -171,6 +247,7 @@ class MediaController(GenericController):
         self.players = {}
 
     def on_start(self, context):
+        self.context = context
         self.players = {}
         self.recent_players = []
         self.current_player = None
@@ -249,12 +326,14 @@ class MediaController(GenericController):
         if instruction.HasField('playlist_instruction'):
             playlist_instruction = instruction.playlist_instruction
             player = self.get_player(playlist_instruction.player_id)
-            handle_playlist_instruction(player, playlist_instruction, callback)
+            handle_playlist_instruction(self.context, player,
+                                        playlist_instruction, callback)
 
         if instruction.HasField('media_instruction'):
             media_instruction = instruction.media_instruction
             player = self.get_player(media_instruction.player_id)
-            handle_media_instruction(player, media_instruction, callback)
+            handle_media_instruction(self.context, player, media_instruction,
+                                     callback)
 
         if (instruction.volume_instruction
                 != VolumeControl.VOLUME_CONTROL_UNKNOWN):
@@ -268,15 +347,15 @@ class MediaController(GenericController):
         return player
 
 
-def handle_playlist_instruction(player, playlist_instruction, callback):
+def handle_playlist_instruction(context, player, playlist_instruction, callback):
     if playlist_instruction.WhichOneof('type') == 'next_track':
-        asyncio.run(player.next())
+        asyncio.run_coroutine_threadsafe(player.next(), context.loop)
         callback(None)
 
 
-def handle_media_instruction(player, media_instruction, callback):
+def handle_media_instruction(context, player, media_instruction, callback):
     if media_instruction.play_state_instruction == PlayStatus.PAUSED:
-        asyncio.run(player.pause())
+        asyncio.run_coroutine_threadsafe(player.pause(), context.loop)
     elif media_instruction.play_state_instruction == PlayStatus.PLAYING:
-        asyncio.run(player.play())
+        asyncio.run_coroutine_threadsafe(player.play(), context.loop)
     callback(None)
