@@ -21,13 +21,15 @@ from anton.ui_pb2 import Page, CustomMessage, DynamicAppRequestType
 from anton_linux.media import MediaController
 from anton_linux.notifications import NotificationsController
 from anton_linux.device import DevicePowerController
+from anton_linux.volume import VolumeController
 from anton_linux.interfaces import Context
 from anton_linux.settings import Settings
 
 
 class LocalLinuxInstance(DeviceHandlerBase):
     CONTROLLERS = [
-        MediaController, DevicePowerController, NotificationsController
+        MediaController, DevicePowerController, NotificationsController,
+        VolumeController
     ]
 
     def __init__(self, context, settings):
@@ -41,6 +43,13 @@ class LocalLinuxInstance(DeviceHandlerBase):
 
         for controller in self.controllers:
             controller.on_start(self.context)
+
+    def on_stop(self):
+        for controller in self.controllers:
+            try:
+                controller.on_stop(self.context)
+            except Exception:
+                pass
 
     def report_capabilities(self):
         event = DeviceState()
@@ -113,6 +122,7 @@ class AntonLinuxPlugin(AntonPlugin):
         self.loop_thread.start()
 
     def on_stop(self):
+        self.device_handler.on_stop()
         self.context.loop.call_soon_threadsafe(self.context.loop.stop)
         self.loop_thread.join()
 

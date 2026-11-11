@@ -335,11 +335,6 @@ class MediaController(GenericController):
             handle_media_instruction(self.context, player, media_instruction,
                                      callback)
 
-        if (instruction.volume_instruction
-                != VolumeControl.VOLUME_CONTROL_UNKNOWN):
-            volume_instruction = instruction.volume_instruction
-            handle_volume_instruction(volume_instruction, callback)
-
     def get_player(self, uri):
         player = self.players.get(uri, None)
         if player is None:

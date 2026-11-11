@@ -8,6 +8,7 @@ runtime {
     py3_runtime_info {
         main_service_class: "anton_linux.service.AntonLinuxPlugin"
         dependencies: "dbus-next"
+        dependencies: "pulsectl"
     }
     pipes {
         pipe_type: DEFAULT
