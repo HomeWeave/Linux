@@ -91,8 +91,9 @@ class Channel(DefaultProtoChannel):
 class AntonLinuxPlugin(AntonPlugin):
 
     def setup(self, plugin_startup_info):
-        self.context = Context(loop=asyncio.get_event_loop(),
-                               dbus=MessageBus())
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        self.context = Context(loop=loop, dbus=MessageBus())
         self.loop_thread = Thread(target=self.context.loop.run_forever)
 
         self.settings = Settings(plugin_startup_info.data_dir)
